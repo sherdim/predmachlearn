@@ -1,0 +1,128 @@
+---
+title: "PML course project"
+author: "Dmitry Sherbina"
+date: "Saturday, October 25, 2014"
+output: html_document
+---
+
+load data and libraries
+```{r}
+library(caret); library(nlme); library(class)
+D=read.csv('pml-training.csv')
+T=read.csv('pml-testing.csv')
+names(D)
+dim(D)
+```
+
+there are many variables (160) in data, some are strange: picth 
+
+```{r, echo=FALSE}
+plot(D$user_name)
+```
+
+data of 6 users are relatively evenly distributed
+
+```{r}
+qplot(X,classe, data = D, color=D$user_name)
+```
+
+samples in dataset are groupped by classe and user_name, but not strictly regular. Random sampling is ok for further slicing.
+
+
+we want to predict one of five possible outcome in variable "classe"
+
+```{r}
+plot(D$classe)
+```
+
+Classe A is most probable of them, but comparable, i.e. of the same order
+
+
+##Preprocessing
+
+change categorical output into numbers
+
+```{r}
+Out=predict(dummyVars(~classe, data=D),newdata=D)
+head(Out)
+```
+
+some variables seem not much useful for prediction, such X or raw.timestamp.part.1
+```{r}
+N=subset(D, select = -c(X, user_name, cvtd_timestamp, raw_timestamp_part_1, raw_timestamp_part_2, cvtd_timestamp,  new_window,  num_window, classe))
+#N=data.frame(N,Out)
+```
+
+many variables are dependent of each other, for example space coordinates of body points, e.g. as seen for arm magnet
+```{r}
+qplot(magnet_arm_x,magnet_arm_z, data=D, color=classe)
+sum(complete.cases(N))/ dim(N)[1]
+```
+also only a fifth of samples are complete
+
+so some dimension reduction will be useful, also remove near zero variated vars
+
+```{r}
+N=subset(N, select=!is.na(N[1,]))
+nzv = nearZeroVar(N,saveMetrics=TRUE)
+N=subset(N, select=!nzv$nzv)
+```
+
+to pick variables to include in a model we will use cross-validation later
+
+
+now transform data to compensate outliers
+```{r, echo=FALSE}
+pp=preProcess(N, method=c('pca'), thres=0.9, verbose = 0)
+NN=predict(pp,N)
+#dim(NN)
+qplot(PC1,PC2, data=NN)
+#qplot(ICA1,ICA2, data=NN, color=classe)
+```
+so data can be converted to 19 components which explain for 0.9 of variation
+
+## Training
+
+use training method - rpart - Tree-Based Model with cross-validation.
+This model is suited for categorical output without converting to indicator vars.
+
+methods failed: rf, svm, WM, treebag, oblique.tree, evtree spls gpls svmSpectrumString  svmRadialWeights svmRadialCost  svmPoly earth bagEarth gcvEarth rpart  bagEarth   ORFpls rpartCost partDSA gamSpline gamboost glmboost blackboost                 , not suited: glm,rlm, plsRglm, lmStepAIC,lm
+
+  for 12 ICA:
+  bayesglm(.3) widekernelpls(.45)
+  
+  methods tried for 12 PC: (Accuracy)
+  pls(.37) widekernelpls(.37) kernelpls(.37) rpart(.5) bayesglm(.32) simpls(.37)
+  ?ctree (0.57) plr(.32 "Penalized Logistic Regression")      
+```{r}
+set.seed(555)
+classe=D$classe
+mo <- train(classe ~.,data=data.frame(N,classe), method="rpart", trControl = trainControl(method='cv')) #, preProcess=c('pca') )
+mo
+```
+
+```{r}
+mo$finalModel
+```
+not able readily interpret residuals because of PCA, so the final version is w/o preprocessing
+
+
+## Check
+
+```{r}
+R=predict(mo, T)
+R
+```
+
+
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+#pml_write_files(R)
+```
+
